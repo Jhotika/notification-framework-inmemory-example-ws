@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= title %></title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+</head>
+<body class="font-sans leading-normal min-h-screen flex flex-col">
+    <header class="bg-gray-800 text-white text-center py-4">
+        <h1 class="text-2xl"><%= title %></h1>
+        <div id="connectionStatus" class="text-sm mt-2">
+            <span class="inline-flex items-center">
+                <span id="statusDot" class="h-2 w-2 rounded-full bg-red-500 mr-2"></span>
+                <span id="statusText">Disconnected</span>
+            </span>
+        </div>
+    </header>
+    <main class="flex flex-1 flex-col md:flex-row">
+        <div class="w-full md:w-1/2 bg-gray-100 p-8 flex flex-col justify-center items-center">
+            <h2 class="text-xl mb-4">Sender</h2>
+            <button id="yoButton" class="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded transition duration-300 w-1/3 aspect-[3/1] flex items-center justify-center">
+                Send Yo
+            </button>
+        </div>
+        <div class="w-full md:w-1/2 bg-gray-200 p-8 flex flex-col justify-center items-center">
+            <h2 class="text-xl mb-4">Receiver</h2>
+            <div class="relative">
+                <i class="fas fa-bell text-4xl text-gray-700 mb-4 cursor-pointer"></i>
+                <span id="unreadCount" class="absolute -top-2 -right-2 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center hidden">0</span>
+            </div>
+            <button id="markAllReadBtn" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded transition duration-300 mb-4">
+                Mark All as Read
+            </button>
+            <div id="notificationList" class="w-full bg-white border border-gray-300 rounded-lg overflow-y-auto max-h-96"></div>
+        </div>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const yoButton = document.getElementById('yoButton');
+            const notificationList = document.getElementById('notificationList');
+            const markAllReadBtn = document.getElementById('markAllReadBtn');
+            const statusDot = document.getElementById('statusDot');
+            const statusText = document.getElementById('statusText');
+            const unreadCount = document.getElementById('unreadCount');
+            const mockIds = { ownerId: "owner__0001", viewerId: "viewer__0001" };
+            let ws = null;
+            function connectWebSocket() {
+                ws = new WebSocket(`ws://${window.location.host}`);
+                ws.onopen = () => {
+                    updateConnectionStatus(true);
+                    ws.send(JSON.stringify({ type: 'identify', userId: mockIds.ownerId }));
+                };
+                ws.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    if (data.type === 'notification') fetchNotifications();
+                };
+                ws.onerror = (error) => {
+                    updateConnectionStatus(false);
+                };
+                ws.onclose = () => {
+                    updateConnectionStatus(false);
+                    setTimeout(connectWebSocket, 3000);
+                };
+            }
+            function updateConnectionStatus(connected) {
+                statusDot.className = `h-2 w-2 rounded-full ${connected ? 'bg-green-500' : 'bg-red-500'} mr-2`;
+                statusText.textContent = connected ? 'Connected' : 'Disconnected';
+            }
+            function updateUnreadCount() {
+                const unreadNotifications = notificationList.querySelectorAll('div.notification-item:not(.bg-gray-100)').length;
+                unreadCount.textContent = unreadNotifications;
+                unreadCount.classList.toggle('hidden', unreadNotifications === 0);
+            }
+            function sendNotification() {
+                fetch('/notifications', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ senderId: mockIds.viewerId, receiverId: mockIds.ownerId }),
+                });
+            }
+            function fetchNotifications() {
+                fetch('/notifications')
+                    .then(response => response.json())
+                    .then(data => {
+                        notificationList.innerHTML = '';
+                        if (data.notifications && Array.isArray(data.notifications)) {
+                            data.notifications.forEach(addNotificationToList);
+                            updateUnreadCount();
+                        } else {
+                            notificationList.innerHTML = '<p class="p-4 text-gray-500">No notifications found.</p>';
+                            updateUnreadCount();
+                        }
+                    })
+                    .catch(() => {
+                        notificationList.innerHTML = '<p class="p-4 text-red-500">Failed to fetch notifications.</p>';
+                    });
+            }
+            function addNotificationToList(notification) {
+                const notificationTile = document.createElement('div');
+                notificationTile.className = `notification-item p-4 border-b border-gray-200 flex justify-between items-center ${notification.notification.isRead ? 'bg-gray-100 text-gray-500' : ''}`;
+                const tickButton = document.createElement('button');
+                tickButton.className = `ml-2 ${notification.notification.isRead ? 'text-gray-400 cursor-not-allowed' : 'text-green-500 hover:text-green-700'}`;
+                tickButton.innerHTML = '<i class="fas fa-check"></i>';
+                tickButton.title = notification.notification.isRead ? 'Already read' : 'Mark as read';
+                if (!notification.notification.isRead) {
+                    tickButton.addEventListener('click', () => markNotificationAsRead(notification.notification.uid));
+                } else {
+                    tickButton.disabled = true;
+                }
+                notificationTile.innerHTML = `
+                    <div class="flex-grow">
+                        <div class="font-bold mb-1">From: ${notification.notification.uid || notification.senderUid || 'Unknown Sender'}</div>
+                        <div class="${notification.notification.isRead ? 'text-gray-400' : 'text-gray-600'}">${notification.message || 'No message'}</div>
+                    </div>
+                `;
+                notificationTile.appendChild(tickButton);
+                notificationList.prepend(notificationTile);
+            }
+            function markAllNotificationsAsRead() {
+                fetch('/notifications/markAllAsRead', { method: 'POST', headers: { 'Content-Type': 'application/json' } }).then(fetchNotifications);
+            }
+            function markNotificationAsRead(notificationId) {
+                fetch(`/notifications/${notificationId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' } }).then(fetchNotifications);
+            }
+            if (yoButton) yoButton.addEventListener('click', sendNotification);
+            if (markAllReadBtn) markAllReadBtn.addEventListener('click', markAllNotificationsAsRead);
+            connectWebSocket();
+            fetchNotifications();
+        });
+    </script>
+</body>
+</html>
