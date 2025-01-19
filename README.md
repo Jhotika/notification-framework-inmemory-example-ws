@@ -1,6 +1,6 @@
 # Notification Framework Demo
 
-A demo of [Notification Framework](https://github.com/Jhotika/notification-framework) integration to a NodeJS/Express application
+A demo of [Notification Framework](https://github.com/Jhotika/notification-framework) integration to a NodeJS/Express application using websockets
 
 ## Installation
 
